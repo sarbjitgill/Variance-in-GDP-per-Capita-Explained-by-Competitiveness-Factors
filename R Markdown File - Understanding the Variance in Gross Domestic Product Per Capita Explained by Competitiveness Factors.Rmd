@@ -1,0 +1,426 @@
+---
+title: <center> **Construction of An Empirical Model to Understand the Variance in Gross Domestic Product Per Capita Explained by Competitiveness Factors** <center>
+subtitle: <center> An Econometrics Project for the 'R Coding and Finance Analytics' Course <center>
+author: "Sarbjit Gill"
+date: "April 10, 2022"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_section: true
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction & Related Literature
+
+    Gross Domestic Product (GDP) is defined as "the monetary value of final goods and services produced in a country in a given period of time" (Callen, 2020). In its raw value-form, GDP provides information on the size of an economy and its value for the given period. GDP per capita further breaks down the value of GDP to economic output per person in that economy. Another metric, real GDP, adjusts the raw GDP value for inflation. This metric is used to understand economic growth or decline over time.
+
+    The state of an economy has an impact on the lives of the constituents residing in that economy (International Labour Office, 2004), as they form a large part of the labour market that produces goods and services in exchange for wages, which they then use for necessities, leisure and savings. Thus, economic growth is generally a healthy sign---though not without caveats, especially in the presence of substantial inequality, poor laws, and disparate benefits across subpopulations---but an economic decline poses an imminent risk to the livelihoods of people who come to depend on the wages and a certain quality of life. Therefore, real GDP and proponents of growth are still valuable subjects that warrant study.
+
+    Economic growth is generally composed of the following: "(1) growth in labour force, (2) growth in physical and natural capital inputs, and (3) total factor productivity growth (TFP) growth, the "unexplained part" of GDP growth, which encompasses all non-physical inputs, such as technological progress, human capital, and institutional and cultural factors" (Schwab, 2018). While (1) and (2) may be easily studied, it is the TFP that is the most convoluted metric and the most influential in driving economic growth. The World Economic Forum's Global Competitiveness Index (GCI), published annually, aims to understand the total factor productivity growth factors of national economies to uncover underlying differences propelling unexplained growth. The 2018 GCI framework is composed of 98 indicators, computing an overall competitiveness score for observed economies and a score for 12 main drivers of productivity: institutions; infrastructure; information and communications technology (ICT) adoption; macroeconomic stability; health; skills; product market; labor market; financial system; market size; business dynamism; and innovation capability. [Appendix I](#appendix-i-2018-global-competitiveness-index-pillars-competitiveness-factor-importance-and-score-composition) details each factor's importance and score composition.
+
+    The purpose of this econometric project is to understand which 2018 GCI productivity drivers best explain the variance in 2017 real GDP per capita of national economies (if any). This information is valuable in understanding where the significant competitiveness gaps lie and what investments economies may make to catch up on the TFP growth. To this end, we'll employ the use of multiple linear regression analysis, by regressing the TFP variables on 2017 GDP per capita data.
+
+# Data Description
+
+```{r, eval=TRUE, echo=FALSE, include=FALSE, results='hide'}
+# DATA IMPORT AND TIDYING
+
+# Importing Global Competitiveness Index Report 2018 Data (produced by the World Economic Forum) and tidying it up to have only the data for TFP Score show up 
+rm(list=ls(all=T))
+
+setwd("~/Documents/Sorbonne/Ca'Foscari/R Coding/R Project")
+
+library(tidyverse)
+library(readxl)
+GCIndexFullData <- read_excel("GCI_4.0_2018_Dataset.xlsx", 
+                       sheet = "Data", 
+                       skip = 3,
+                       range = "A4:ES1001",
+                       col_types = c(rep("skip", 4), "text", rep("skip", 4), rep("text", 140)))
+
+# Removing unwanted rows (observations are in columns. I will address this next)
+TFPScore <- GCIndexFullData[-c(1:19, 21:243, 245:391, 393:432, 434:458, 460:470, 472:594, 596:686, 688:797, 799:893, 895:917, 919:996), ]
+
+# Transposing the dataframe to have the observations show up correctly
+library(sjmisc)
+TFPScore <- TFPScore %>% rotate_df(rn = "Country Name", cn = TRUE)
+
+# Converting character variables into numeric
+cols.num <- c(2:13)
+TFPScore[cols.num] <- sapply(TFPScore[cols.num],as.numeric)
+sapply(TFPScore, class)
+TFPScore <- as_tibble(TFPScore)
+rm(cols.num)
+
+# Importing the second dataset. It comes from the World Bank Website and it contains the 2017 GDP Values (PPP, Constant).
+library(readxl)
+as_tibble(GDPData <- read_excel("API_NY.GDP.PCAP.PP.KD_DS2_en_excel_v2_3732022.xls",
+                                sheet = "Data", 
+                                skip = 3, 
+                                col_types = c("text", "skip", "text", rep("skip", 59), "numeric", rep("skip", 3))))
+
+# Renaming country names to match between GDPData and TFPScore dataset. Since TFPScore dataframe is shorter, we'll rename using its values and then drop the observations later with missing values after comibing the datasets.
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "Congo, Dem. Rep.", "Congo, Democratic Rep.")
+
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "Cabo Verde", "Cape Verde")
+
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "Cote d'Ivoire", "Côte d'Ivoire")
+
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "Egypt, Arab Rep.", "Egypt")
+
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "North Macedonia", "Macedonia, FYR")
+
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "Venezuela, RB", "Venezuela")
+
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "Vietnam", "Viet Nam")
+
+GDPData <- 
+  GDPData %>%
+  mutate_at("Country Name", str_replace, "Yemen, Rep.", "Yemen")
+
+# Joining the datasets so as to work within a single dataframe
+GDPTFP <- left_join(GDPData, TFPScore, by = "Country Name")
+
+# Renaming Columns
+GDPTFP <- rename(GDPTFP, '2017 GDP Per Capita' = '2017'
+       , 'Income Group' = 'IncomeGroup'
+       , 'Institutions' = '1st pillar: Institutions'
+       , 'Infrastructure' = '2nd pillar: Infrastructure'
+       , 'ICT Adoption' = '3rd pillar: ICT adoption'
+       , 'Macroeconomic Stability' = '4th pillar: Macroeconomic stability'
+       , 'Health' = '5th pillar: Health'
+       , 'Skills' = '6th pillar: Skills'
+       , 'Product Market' = '7th pillar: Product market'
+       , 'Labor Market' = '8th pillar: Labor market'
+       , 'Financial System' = '9th pillar: Financial system'
+       , 'Market Size' = '10th pillar: Market size'
+       , 'Business Dynamism' = '11th pillar: Business dynamism'
+       , 'Innovation Capability' = '12th pillar: Innovation capability')
+
+# Dropping all observations with missing values as we cannot use these observations for regression treatment and analysis
+GDPTFP <- drop_na(GDPTFP)
+
+# Changing 'Income Group' variable to a factor variable
+GDPTFP <- GDPTFP %>% mutate_at(vars(2), factor)
+
+# Removing original datasets from the environment
+rm(GCIndexFullData)
+rm(TFPScore)
+rm(GDPData)
+
+# Assigning summary to a new dataframe to print it properly, else 2 summaries are printed, one from R and one from Kable 
+library(statar)
+datasummary <- sum_up(GDPTFP)
+
+# Creating a dataframe for regressors to use in a little bit
+Regressors <- data_frame(GDPTFP[ , 4:15])
+result <- sum(cor(Regressors) > 0.75)
+value <- (result - 12) / 2
+```
+
+    The data for this econometrics project comes from the World Economic Forum's 2018 Global Competitiveness Index (Schwab, 2018), where 140 economies were scored across 12 main drivers of productivity via 98 indicators. The score for each productivity driver is numeric, and the allotted score range is 0-100 for each. The real GDP per capita values (constant, 2017 PPP) used in this project, as well as the country income classification, come from the World Bank website (The World Bank Group, 2021). The GCI and World Bank data were combined to create a single dataset, and observations with missing values were discarded due to their non-use in regression treatment and analysis. Additionally, Hong Kong was excluded as it is not a national economy. The final number of observations is 136 national economies, of which 85 are developed (high income or upper middle income) and 51 are developing (low income or lower middle income). The significance level of 0.05 is used in this project based on the sample size. Project data and other files can be accessed at this [Google Drive link](https://drive.google.com/drive/folders/1adqmGqwa635aOKz_tJ79FeXAtApVjpfQ?usp=sharing).
+
+    A number of descriptive statistics tests were ran to better understand the data at hand. Upon first checking the data using the summary command (see [figure 1](#data_summary) below), we uncover variables with a high standard deviation and large gaps between the minimum and maximum values, indicating the potential of outliers and influential variables. These include 2017 GDP per capita, health, ICT adoption, market size, and innovation capability. Outliers and influential variables will be examined shortly.    
+<a id="lin73"></a>
+    
+
+<a id="data_summary"></a>
+<p style="color :#327eac; "> **Figure 1: Data Summary** </p>  
+```{r echo=FALSE}
+knitr::kable(datasummary)
+```
+<a id="line3"></a>
+  
+    
+    Next, correlation among the explanatory variables was checked (see [figure 2](#variable_correlation) below) using >0.7 as the reference. We uncover that a number of variables are closely correlated based on the test reference (`r {value}` unique values). Thus, near multicollinearity may pose an issue in regression analysis. However, since there are no data entry errors, variables are kept as is and they will be investigated further.
+
+    
+<a id="variable_correlation"></a>
+<p style="color :#327eac; "> **Figure 2: Correlation between explanatory variables** </p>
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(kableExtra)
+knitr::kable(cor(Regressors), digits=2)
+```  
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Generating logs and scatterplots. Checking "kdensity"s of all variables and fit of data of explanatory variables against the Y variable. Then selecting log or level variables for full empirical model best explaining our Y variable. We check to see if variables are signficant.
+
+##### 1. Dependent Variable: GDP
+plot(density(GDPTFP$`2017 GDP Per Capita`, kernel = c("gaussian")))
+GDPTFP$loggdp <- log(GDPTFP$`2017 GDP Per Capita`)
+plot(density(GDPTFP$loggdp), kernel = c("gaussian"))
+
+#NOTE: loggdp appears more normal and with less variation. We'll keep both variables for now and investigate ahead.
+
+##### 2. Regressor Variable: Institutions (Cross-Checked with GDP)
+plot(density(GDPTFP$`Institutions`, kernel = c("gaussian")))
+GDPTFP$loginstitutions <- log(GDPTFP$`Institutions`)
+plot(density(GDPTFP$loginstitutions), kernel = c("gaussian"))
+#NOTE: loginstitutions appears more normal. Checking scatterplots ahead.
+
+library(stats)
+plot(GDPTFP$`Institutions`, GDPTFP$'2017 GDP Per Capita') 
+abline(lm(GDPTFP$'2017 GDP Per Capita' ~ GDPTFP$`Institutions`))
+#NOTE: Not the best fit
+
+plot(GDPTFP$`loginstitutions`, GDPTFP$'2017 GDP Per Capita') 
+abline(lm(GDPTFP$'2017 GDP Per Capita' ~ GDPTFP$`loginstitutions`))
+#NOTE: Not the best fit. 2017 GDP Per Capita to be discarded
+
+plot(GDPTFP$`Institutions`, GDPTFP$loggdp) 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$`Institutions`))
+#NOTE: loggdp is a better fit with data appearing relatively normal on both sides of the line
+
+plot(GDPTFP$`loginstitutions`, GDPTFP$loggdp) 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$`loginstitutions`))
+#NOTE: loggdp is a better fit with data appearing relatively normal on both sides of the line
+
+#NOTE: Now, since both loggdp scatterplots appear to be similar, we'll run a quick regression to see which variable explains "loggdp" better
+
+summary(lm(GDPTFP$loggdp ~ GDPTFP$`Institutions`))
+summary(lm(GDPTFP$loggdp ~ GDPTFP$`loginstitutions`))
+
+#NOTE: "loginstitutions" has a higher R-squared value. Thus, keep "loginstitutions" and drop "Institutions"
+
+##### 3. Regressor Variable: Infrastructure (Cross-Checked with GDP)
+plot(density(GDPTFP$`Infrastructure`, kernel = c("gaussian")))
+GDPTFP$loginfrastructure <- log(GDPTFP$`Infrastructure`)
+plot(density(GDPTFP$loginfrastructure), kernel = c("gaussian"))
+
+# Two-Way Scatterplot
+plot(GDPTFP$`Infrastructure`, GDPTFP$loggdp) 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$`Infrastructure`))
+
+plot(GDPTFP$`loginfrastructure`, GDPTFP$loggdp) 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$`loginfrastructure`))
+#NOTE: Infrastructure appears to be a better fit
+
+# Quick Regression and R-Squared Value Check
+summary(lm(GDPTFP$loggdp ~ GDPTFP$`Infrastructure`))
+summary(lm(GDPTFP$loggdp ~ GDPTFP$`loginfrastructure`))
+# NOTE: Keep infrastructure, discard loginfrastructure
+
+##### 4. For the remaining variables, they'll be first transformed into log variables and then the original and log variables will be regressed on loggdp variables to determine which explain the variation in loggdp better. We'll build our empirical model with those variables.
+
+# Log Transformation
+DatatoTransform <- GDPTFP[ , 6:15]
+DatatoTransform <- log(DatatoTransform)
+DatatoTransform <- rename(DatatoTransform, 'logictadoption' = 'ICT Adoption', 'logmicroeconomicstability' = 'Macroeconomic Stability', 'loghealth' = 'Health', 'logskills' = 'Skills', 'logproductmarket' = 'Product Market', 'loglabormarket' = 'Labor Market', 'logfinancialsystem' = 'Financial System', 'logmarketsize' = 'Market Size', 'logbusinessdynamism' = 'Business Dynamism', 'loginnovationcapability' = 'Innovation Capability')
+GDPTFP <- cbind(GDPTFP, DatatoTransform)
+
+# Define Function to Test Original vs Transformed Explanatory Variables
+ExplanatoryPower_OrigVsLog <- function(a, b) {
+  result <- summary(lm(GDPTFP$loggdp ~ a))$r.squared > summary(lm(GDPTFP$loggdp ~ b))$r.squared
+   print(result)
+}
+
+ExplanatoryPower_OrigVsLog(GDPTFP$'ICT Adoption', GDPTFP$'logictadoption')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Macroeconomic Stability', GDPTFP$'logmicroeconomicstability')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Health', GDPTFP$'loghealth')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Skills', GDPTFP$'logskills')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Product Market', GDPTFP$'logproductmarket')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Labor Market', GDPTFP$'loglabormarket')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Financial System', GDPTFP$'logfinancialsystem')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Market Size', GDPTFP$'logmarketsize')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Business Dynamism', GDPTFP$'logbusinessdynamism')
+ExplanatoryPower_OrigVsLog(GDPTFP$'Innovation Capability', GDPTFP$'loginnovationcapability')
+
+######NOTE: Final variables to keep for the empirical model: loggdp, loginstitutions, Infrastructure, ICT Adoption, Macroeconomic Stability, Health, Skills, Product Market, Labor Market, logfinancialsystem, logmarketsize, Business Dynamism, loginnovationcapability.
+
+FinalRegressors <- GDPTFP[ , c(5:11, 14, 17, 25:26, 28)]
+
+# Significance Test of Our Explanatory Variables
+
+SignificanceTest <- function(a) {
+   result <- summary(lm(GDPTFP$loggdp ~ a))$coefficients[,4] <= 0.05
+   print(result) 
+  }
+
+SignificanceTest(GDPTFP$'loginstitutions')
+SignificanceTest(GDPTFP$'Infrastructure')
+SignificanceTest(GDPTFP$'ICT Adoption')
+SignificanceTest(GDPTFP$'Macroeconomic Stability')
+SignificanceTest(GDPTFP$'Health')
+SignificanceTest(GDPTFP$'Skills')
+SignificanceTest(GDPTFP$'Product Market')
+SignificanceTest(GDPTFP$'Labor Market')
+SignificanceTest(GDPTFP$'logfinancialsystem')
+SignificanceTest(GDPTFP$'logmarketsize')
+SignificanceTest(GDPTFP$'Business Dynamism')
+SignificanceTest(GDPTFP$'loginnovationcapability')
+# All variables are significant in explaining the variation in loggdp, our dependent variables.
+```
+<a id="line"></a>
+  
+    
+   Next, we checked for the normality of our data, which is a key assumption to conduct regression analysis. For robusting testing, we created new variables by transforming our explanatory variables into logs. Kernel densities of level and log variables were checked with a normal curve overlay to compare and see if the data closely follows a normal distribution. We find that the log of our dependent variable is a better fit with our explanatory variables.  
+   
+
+<a id="Table1"></a>
+<a id="scatterplots"></a>
+<p style="color :#327eac; "> **Table 1: Code Used to Conduct Tests in RStudio** </p>
+```
+plot(density(GDPTFP$`2017 GDP Per Capita`, kernel = c("gaussian")))
+```
+```
+plot(GDPTFP$`Institutions`, GDPTFP$'2017 GDP Per Capita', col = '#2fa4e7') 
+```
+```
+abline(lm(GDPTFP$'2017 GDP Per Capita' ~ GDPTFP$`Institutions`, col = "red"))
+```
+
+   And since the explanatory variables data is relatively stable, taking values in only 0-100 in levels and stable under logs, we next compared whether levels or logs of explanatory variables best explain the dependent variable by regressing each on loggdp. Custom functions were created in R to conduct the p-value and r-squared comparisons. After conducting the graphical and regression tests, logs of the following variables were found to be a better fit with the log of our dependent variable: institutions, financial system, market size, and innovation capability. All of our explanatory variables are significant per the t-test (p-value\<0.05) and positively correlated with the dependent variable. Scatterplots of tests (best-fitting levels/logs only) are shared below demonstrating this relationship.
+<a id="line2"></a>
+  
+  
+<a id="scatterplots"></a>
+<p style="color :#327eac; "> **Figure 3: Linearity between loggdp and explanatory variables (best-fitting levels/logs only)** </p>
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#Scatterplots
+
+layout(matrix(c(1:6), nrow = 2, byrow = TRUE))
+plot(GDPTFP$loginstitutions,  GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'loginstitutions'), col = "red")
+plot(GDPTFP$'Infrastructure', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'Infrastructure'), col = "red")
+plot(GDPTFP$'ICT Adoption', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'ICT Adoption'), col = "red")
+plot(GDPTFP$'Macroeconomic Stability', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'Macroeconomic Stability'), col = "red")
+plot(GDPTFP$'Health', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'Health'), col = "red")
+plot(GDPTFP$'Skills', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'Skills'), col = "red")
+
+layout(matrix(c(1:6), nrow = 2, byrow = TRUE))
+plot(GDPTFP$'Product Market', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'Product Market'), col = "red")
+plot(GDPTFP$'Labor Market', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'Labor Market'), col = "red")
+plot(GDPTFP$'logfinancialsystem', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'logfinancialsystem'), col = "red")
+plot(GDPTFP$'logmarketsize', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'logmarketsize'), col = "red")
+plot(GDPTFP$'Business Dynamism', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'Business Dynamism'), col = "red")
+plot(GDPTFP$'loginnovationcapability', GDPTFP$loggdp, col = '#2fa4e7') 
+abline(lm(GDPTFP$loggdp ~ GDPTFP$'loginnovationcapability'), col = "red")
+
+library(mathjaxr)
+```
+
+# Econometric Methodology
+
+   Based on the research motive and data transformation of select variables (level to logs), we'll use the following empirical econometric model to understand which 2018 GCI productivity drivers best explain the variance in 2017 real GDP per capita (PPP) of national economies, if any:
+
+$$loggdp_{i} = \beta_{0i} + (\beta_{1} * infrastructure)_{i} + (\beta_{2} * loginstitutions)_{i} + (\beta_{3} * ictadoption)_{i} + (\beta_{4} * macroeconomicstability)_{i} + (\beta_{5} * health)_{i} + (\beta_{6} * skills)_{i} + (\beta_{7} * productmarket)_{i} + (\beta_{8} * labormarket)_{i} + (\beta_{9} * logfinancialsystem)_{i} + (\beta_{10} * logmarketsize)_{i} + (\beta_{11} * businessdynamism)_{i} + (\beta_{12} * loginnovationcapability)_{i} + u_{i}$$
+    where, 2017 real GDP per capita (PPP) is our dependent Y variable in the log form, $\beta_{0}$ is the constant, $\beta_{1}$-$\beta_{12}$ are coefficients of the explanatory variables, u is the error term, and the 12 explanatory variables are: infrastructure, institutions (log form), ICT adoption, macroeconomic stability, health, skills, product market, labor market, financial system (log form), market size, business dynamism, and innovation capability (log form). Our model above is in terms of observation i. Our goal is to predict the best regression line, using our sample and explanatory variables, to explain the variance in loggdp:
+
+$$\hat{loggdp} = \hat{\beta_{0}} + \hat{(\beta_{1} * infrastructure)} + \hat{\beta_{2} * loginstitutions)} + \hat{(\beta_{3} * ictadoption)} + \hat{(\beta_{4} * macroeconomicstability)} + \hat{(\beta_{5} * health)} + \hat{(\beta_{6} * skills)} + \hat{(\beta_{7} * productmarket)} + \hat{(\beta_{8} * labormarket)} + \hat{(\beta_{9} * logfinancialsystem)} + \hat{(\beta_{10} * logmarketsize)} + \hat{(\beta_{11} * businessdynamism)} + \hat{(\beta_{12} * loginnovationcapability)}$$
+
+
+## First Estimation of the Model
+
+    The naïve first estimation of our full model (see [figure 4](#first_regression) below) reveals that our global model is significant (fisher test p-value < 0.05). It has an adjusted R-square of 89.42%, explaining 89% of the variance in our dependent variable. However, 8 of our variables are not significant post-regression (t-test p-value > 0.05): institutions (log form), macroeconomic stability, health, product market, labor market, financial system (log form), market size (log form), and innovation capability (log form). On the other hand, the variables "business dynamism", "labor market" and "innovation capability (log form)" were positively correlated before regression, but now are negatively correlated. The VIF analysis shows (see [figure 5](#VIF_analysis) below) that 8 of our 12 variables have a variance inflation factor of more than five and a mean VIF of 6.16. Near multicollinearity may likely be the issue affecting our model. Finally, our residuals appear mostly well-behaved, but there may be a heteroskedasticity issue (see [figure 6](#Residual-versus-fitted) below). We will investigate our first regression estimate further to refine it. However, we will not remove any variables at this stage.
+
+<a id="first_regression"></a>
+<p style="color :#327eac; "> **Figure 4: First regression estimation of the empirical model** </p>
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Naive first regression model analysis
+naivemodel <- lm(GDPTFP$loggdp ~ GDPTFP$'loginstitutions' + GDPTFP$'Infrastructure' + GDPTFP$'ICT Adoption' + GDPTFP$'Macroeconomic Stability' + GDPTFP$'Health' + GDPTFP$'Skills' + GDPTFP$'Product Market' + GDPTFP$'Labor Market' + GDPTFP$'logfinancialsystem' + GDPTFP$'logmarketsize' + GDPTFP$'Business Dynamism' + GDPTFP$'loginnovationcapability')
+print(summary(naivemodel))
+```
+
+<a id="VIF_analysis"></a>
+<p style="color :#327eac; "> **Figure 5: VIF analysis** </p>
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(regclass)
+VIF(naivemodel)
+```
+
+<a id="Residual-versus-fitted"></a>
+<p style="color :#327eac; "> **Figure 6: Residual-versus-fitted plot** </p>
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+res <- resid(naivemodel)
+plot(fitted(naivemodel), res, col = '#2fa4e7', type = "p")
+abline(0,0, col = "red")
+```
+
+    <p style="color :red; "> **NOTE FOR PROFESSOR PASTORE:** Dear professor, kindly view this R project as the starting point for the regression project I'll complete in near future using RStudio. However, I duly hope I have demonstrated enough techniques and proficiency with the software through completion of the work thus far. I am sincerely thankful for your teaching. </p>
+
+
+# Detection of Outliers and Influential Observations
+Section to be completed at a later date.
+
+# Comments on Regression
+Section to be completed at a later date.
+
+# Heteroskedasticity: Diagnostics & Correction
+Section to be completed at a later date.
+
+# Tests and Variable Selection
+Section to be completed at a later date.
+
+# Test for Structural Change
+Section to be completed at a later date.
+
+# Presentation of the Final Econometric Model
+Section to be completed at a later date.
+
+# Conclusions
+Section to be completed at a later date.
+
+# References
+1. Callen, T. (2020, February 24). “Gross Domestic Product: An Economy’s All. https://www.imf.org/external/pubs/ft/fandd/basics/gdp.htm. (2021, 26 March).
+2. International Labour Office. (2004). “Economic Security for a Better World.” ILO Socio-Economic Security Programme
+3. Schwab, K. (2018). “The Global Competitiveness Report.” World Economic Forum. pp. 43.
+4. A4ID. (2016, April 25). “Understanding the Developed/Developing Country Taxonomy.”A4ID. https://www.a4id.org/policy/understanding-the-developeddeveloping-country-taxonomy/. (2021, 26 March).
+5. The World Bank Group. (2017) “GDP per capita, PPP (constant 2017 international $)” The World Bank, https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD?end=2017. (2021, 26 March).
+
+# Appendix I: 2018 Global Competitiveness Index Pillars: Competitiveness Factor Importance and Score Composition {#appendix-i-2018-global-competitiveness-index-pillars-competitiveness-factor-importance-and-score-composition}
+
+    The content in the table below is republished from the 2018 Global Competitiveness Index report (Schwab, 2018) to provide researchers' rationale for the importance of each competitiveness factor assessed and its score composition.
+
+| **Competitiveness Factor** | **What does it capture?** | **Why does it matter?**|
+|-----------------|---------------------------|---------------------------|
+| Institutions | Security, property rights, social capital, checks and balances, transparency and ethics, public-sector performance and corporate governance. | By establishing constraints, both legal (laws and enforcement mechanisms) and informal (norms of behaviors), institutions determine the context in which individuals organize themselves and their economic activity. Institutions impact productivity, mainly through providing incentives and reducing uncertainties. |
+| Infrastructure             | The quality and extension of transport infrastructure (road, rail, water and air) and utility infrastructure.                                                                                                                                                                                            | Better-connected geographic areas have generally been more prosperous. Well-developed infrastructure lowers transportation and transaction costs, and facilitates the movement of goods and people and the transfer of information within a country and across borders. It also ensures access to power and water---both necessary conditions for modern economic activity.                                                                                                                   |
+| ICT adoption               | The degree of diffusion of specific information and communication technologies (ICTs).                                                                                                                                                                                                                   | ICTs reduce transaction costs and speed up information and idea exchange, improving efficiency and sparking innovation. As ICTs are general purpose technologies increasingly embedded in the structure of the economy, they are becoming as necessary as power and transport infrastructure for all economies.                                                                                                                                                                               |
+| Macroeconomic stability    | The level of inflation and the sustainability of fiscal policy.                                                                                                                                                                                                                                          | Moderate and predictable inflation and sustainable public budgets reduce uncertainties, set returns expectations for investments and increase business confidence---all of which boost productivity. Also, in an increasingly interconnected world where capital can move quickly, loss of confidence in macroeconomic stability can trigger capital flight, with destabilizing economic effects.                                                                                             |
+| Health                     | Health-adjusted life expectancy (HALE)---the average number of years a newborn can expect to live in good health.                                                                                                                                                                                        | Healthier individuals have more physical and mental capabilities, are more productive and creative, and tend to invest more in education as life expectancy increases. Healthier children develop into adults with stronger cognitive abilities.                                                                                                                                                                                                                                              |
+| Skills                     | The general level of skills of the workforce and the quantity and quality of education. While the concept of educational quality is constantly evolving, important quality factors today include: developing digital literacy, interpersonal skills, and the ability to think critically and creatively. | Education embeds skills and competencies in the labour force. Highlyeducated populations are more productive because they possess greater collective ability to perform tasks and transfer knowledge quickly, and create new knowledge and applications.                                                                                                                                                                                                                                      |
+| Product market             | The extent to which a country provides an even playing field for companies to participate in its markets. It is measured in terms of extent of market power, openness to foreign firms and the degree of market distortions.                                                                             | Competition supports productivity gains by incentivizing companies to innovate; update their products, services and organization; and supply the best possible products at the fairest price.                                                                                                                                                                                                                                                                                                 |
+| Labour market              | It encompasses "flexibility", namely, the extent to which human resources can be reorganized and "talent management", namely, the extent to which human resources are leveraged.                                                                                                                         | Well-functioning labour markets foster productivity by matching workers with the most suitable jobs for their skillset and developing talent to reach their full potential. By combining flexibility with protection of workers' basic rights, well-functioning labour markets allow countries to be more resilient to shocks and re-allocate production to emerging segments; incentivize workers to take risks; attract and retain talent; and motivate workers.                            |
+| Financial system           | The depth, namely the availability of credit, equity, debt, insurance and other financial products, and the stability, namely, the mitigation of excessive risk-taking and opportunistic behavior of the financial system.                                                                               | A developed financial sector fosters productivity in mainly three ways: pooling savings into productive investments; improving the allocation of capital to the most promising investments through monitoring borrowers, reducing information asymmetries; and providing an efficient payment system. At the same time, appropriate regulation of financial institutions is needed to avoid financial crises that may cause long-lasting negative effects on investments and productivity.    |
+| Market size                | The size of the domestic and foreign markets to which a country's firms have access. It is proxied by the sum of the value of consumption, investment and exports.                                                                                                                                       | Larger markets lift productivity through economies of scale: the unit cost of production tends to decrease with the amount of output produced. Large markets also incentivize innovation. As ideas are non-rival, more potential users means greater potential returns on a new idea. Moreover, large markets create positive externalities as accumulation of human capital and transmission of knowledge increase the returns to scale embedded in the creation of technology or knowledge. |
+| Business dynamism          | The private sector's capacity to generate and adopt new technologies and new ways to organize work, through a culture that embraces change, risk, new business models, and administrative rules that allow firms to enter and exit the market easily.                                                    | An agile and dynamic private sector increases productivity by taking business risks, testing new ideas and creating innovative products and services. In an environment characterized by frequent disruption and redefinition of businesses and sectors, successful economic systems are resilient to technological shocks and are able to constantly re-invent themselves.                                                                                                                   |
+| Innovation capability      | The quantity and quality of formal research and development; the extent to which a country's environment encourages collaboration, connectivity, creativity, diversity and confrontation across different visions and angles; and the capacity to turn ideas into new goods and services.                | Countries that can generate greater knowledge accumulation and that offer better collaborative or interdisciplinary opportunities tend to have more capacity to generate innovative ideas and new business models, which are widely considered the engines of economic growth. |
+
+# Appendix II: Project Files
+
+Project files can be accessed at this [Google Drive link](https://drive.google.com/drive/folders/1adqmGqwa635aOKz_tJ79FeXAtApVjpfQ?usp=sharing) and are composed of the following:
+
+-   [World Bank Dataset: 2017 GDP, Constant, PPP Value](https://docs.google.com/spreadsheets/d/1ReZ5PkjGq9xOIxmI32VVu4bMSgHcSlwe/edit?usp=sharing&ouid=113242533871560679061&rtpof=true&sd=true)
+-   [Global Competitiveness Index 2018 Dataset](https://docs.google.com/spreadsheets/d/1vN1M0LtL3Nzjz4RL3hBkYOF1PKk4Pn8H/edit?usp=sharing&ouid=113242533871560679061&rtpof=true&sd=true)
+-   R Markdown File
+-   R Data File
+-   Project HTML File
